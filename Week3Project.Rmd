@@ -1,0 +1,215 @@
+---
+title: "NYPD Police Shooting (Historic) Data Analysis"
+author: "Data Science Student"
+date: "8/24/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+****
+```{r,echo=TRUE}
+# Loading libraries
+library(tidyr)
+library(ggplot2)
+library(stringr)
+library(lubridate)
+library(dplyr)
+```
+****
+### Reading Session Information
+```{r, echo=TRUE}
+sessionInfo()
+```
+****
+## **NYPD Police Shooting (Historic) Data Analysis**
+### Reading the URL and data
+Reading the URL for NYPD Police shooting (Historic) data file download
+```{r,echo=TRUE}
+url_link <- "https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD"
+nyc_ps_data <- read.csv(url_link)
+# Sorting the data by INCIDENT_KEY
+nyc_ps_data <- arrange(nyc_ps_data, INCIDENT_KEY)
+```
+### Removing unwanted data columns
+```{r,echo=TRUE}
+nyc_ps_data <- nyc_ps_data %>% select(-c("X_COORD_CD", "Y_COORD_CD", "Latitude", "Longitude", "Lon_Lat"))
+
+# Omitting 3 rows with Perp age group not representing a proper range
+nyc_ps_data <- nyc_ps_data %>% filter((PERP_AGE_GROUP != 224) & (PERP_AGE_GROUP != 940) & (PERP_AGE_GROUP != 1020))
+
+str(nyc_ps_data)
+```
+### Formatting Date and time columns
+```{r,echo=TRUE}
+# Date formatted using the mutate function to standard mdy
+nyc_ps_data <- nyc_ps_data %>% mutate(OCCUR_DATE = mdy(nyc_ps_data$OCCUR_DATE))
+#check to see that the format has changed
+#class(nyc_ps_data$OCCUR_DATE)
+# Formatting the time
+#time_data <- nyc_ps_data %>% select(INCIDENT_KEY, OCCUR_TIME)
+nyc_ps_data$OCCUR_TIME <- hms(nyc_ps_data$OCCUR_TIME)
+#check to see that the time format has changed
+#class(nyc_ps_data$OCCUR_TIME)
+```
+
+****
+### Converting Null values to UNKNOWN for a few columns
+```{r,echo=TRUE}
+ for(i in 1:nrow(nyc_ps_data)) {
+   
+   if(nyc_ps_data$LOCATION_DESC[i] == "") {
+     nyc_ps_data$LOCATION_DESC[i] <- "UNKNOWN LOC DESC"
+   }
+   if(nyc_ps_data$PERP_AGE_GROUP[i] == "") {
+    nyc_ps_data$PERP_AGE_GROUP[i] <- "UNKNOWN PERP AGE GROUP"
+  }
+  if(nyc_ps_data$PERP_SEX[i] == "") {
+    nyc_ps_data$PERP_SEX[i] <- "UNKNOWN PERP SEX"
+  }
+  if(nyc_ps_data$PERP_RACE[i] == "") {
+    nyc_ps_data$PERP_RACE[i] <- "UNKNOWN PERP RACE"
+  }
+}
+```
+### "Factor"izing the categorical variables
+```{r,echo=TRUE}
+nyc_ps_data$BORO <- as.factor(nyc_ps_data$BORO)
+nyc_ps_data$LOCATION_DESC <- as.factor(nyc_ps_data$LOCATION_DESC)
+nyc_ps_data$STATISTICAL_MURDER_FLAG <- as.factor(nyc_ps_data$STATISTICAL_MURDER_FLAG)
+nyc_ps_data$PERP_AGE_GROUP <- as.factor(nyc_ps_data$PERP_AGE_GROUP)
+nyc_ps_data$PERP_SEX <- as.factor(nyc_ps_data$PERP_SEX)
+nyc_ps_data$PERP_RACE <- as.factor(nyc_ps_data$PERP_RACE)
+nyc_ps_data$VIC_AGE_GROUP <- as.factor(nyc_ps_data$VIC_AGE_GROUP)
+nyc_ps_data$VIC_SEX <- as.factor(nyc_ps_data$VIC_SEX)
+nyc_ps_data$VIC_RACE <- as.factor(nyc_ps_data$VIC_RACE)
+```
+### Structure and Summary
+```{r,echo=FALSE}
+# Structure of the data set
+str(nyc_ps_data)
+# Sumamry information of the data set
+summary(nyc_ps_data)
+```
+****
+### Duplicate INCIDENT Identifcation
+``` {r,echo=TRUE}
+# Identifying duplicate Incidents and storing in a dataframe
+# Duplicate INCIDENTS indicate more than one shooting/victim
+incident_vector <- nyc_ps_data$INCIDENT_KEY
+incident_df <- data.frame(incident_vector[duplicated(incident_vector)])
+incident_df <- distinct(incident_df)
+names(incident_df)[1] <- 'INCIDENT_KEY'
+
+dup_incident_ps_data <- nyc_ps_data %>% inner_join(incident_df, by = c("INCIDENT_KEY"))
+str(dup_incident_ps_data)
+
+```
+****
+### Data Summarization
+``` {r,echo=TRUE}
+# Summarization by Boroughs
+
+boro_totals <- nyc_ps_data %>% group_by(BORO, STATISTICAL_MURDER_FLAG) %>% summarise(totals_by_boro = n())
+
+# Grouping of all incidents by Borough and Year
+nyc_data_by_year <- nyc_ps_data %>% mutate(inc_year = year(OCCUR_DATE))  %>% 
+  select(c(BORO:VIC_RACE),inc_year)
+str(nyc_data_by_year)
+
+# Summarization of all incidents by Borough and Year
+nyc_data_summary_by_boro_year <- nyc_data_by_year %>% group_by(BORO,inc_year) %>% 
+  summarize(totals_by_boro_year = n())
+
+# Summarization of all incidents by Year
+nyc_data_summary_by_year <- nyc_data_summary_by_boro_year %>% group_by(inc_year) %>% 
+  summarize(totals_by_year =sum(totals_by_boro_year))
+
+# Summarization of duplicate INCIDENTS by a set of values
+dup_boro_totals_by_date <- dup_incident_ps_data %>% group_by(INCIDENT_KEY, BORO, OCCUR_DATE, OCCUR_TIME, LOCATION_DESC, PRECINCT, VIC_SEX, STATISTICAL_MURDER_FLAG) %>% summarise(totals = n()) %>% select(INCIDENT_KEY, BORO, OCCUR_DATE, OCCUR_TIME, LOCATION_DESC, PRECINCT, VIC_SEX, STATISTICAL_MURDER_FLAG,totals)
+head(dup_boro_totals_by_date %>% select(INCIDENT_KEY, BORO,STATISTICAL_MURDER_FLAG, totals, everything()))
+tail(dup_boro_totals_by_date %>% select(INCIDENT_KEY, BORO,STATISTICAL_MURDER_FLAG, totals, everything()))
+
+# Grouping of duplicates incidents by Borough 
+dup_boro_totals <- dup_boro_totals_by_date %>% group_by(BORO, STATISTICAL_MURDER_FLAG) %>% summarise(total_incidents = sum(totals))
+head(dup_boro_totals)
+
+# Grouping of duplicate incidents by Borough and Year
+dup_boro_totals_by_year <- dup_boro_totals_by_date %>% mutate(dup_year = year(OCCUR_DATE)) %>% select(BORO, dup_year, STATISTICAL_MURDER_FLAG)
+
+# Summarization of duplicate incidents by Borough and Year
+dup_boro_summary_by_year <- dup_boro_totals_by_year %>% group_by(BORO, dup_year) %>% summarize(dup_totals_by_year = n())
+
+```
+****
+### Plots
+```{r,echo=TRUE}
+# Plot of incident totals by Borough and classification of murder vs injury
+boro_totals %>%
+  ggplot(aes(fill=STATISTICAL_MURDER_FLAG, x=BORO,y=totals_by_boro)) + 
+  geom_bar(position = 'dodge', stat ='identity') +
+  theme(axis.text.x = element_text(angle = 45, hjust=1)) +
+  xlab("Borough") + ylab("Incidents by Borough")
+
+# Plot of duplicate incident totals by Borough and classification of murder vs injury
+dup_boro_totals %>%
+  ggplot(aes(fill = STATISTICAL_MURDER_FLAG,x=BORO, y=total_incidents)) +
+  geom_bar(position = 'dodge', stat = 'identity') +
+  theme(axis.text.x = element_text(angle = 45, hjust=1)) +
+  xlab("Borough") + ylab("Duplicate Incidents by Borough")
+
+# Plot of summary of duplicate incident totals by Borough by Year
+dup_boro_summary_by_year %>%
+  ggplot(aes(fill = BORO,x=dup_year, y=dup_totals_by_year)) +
+  geom_bar(position = 'dodge', stat = 'identity') +
+  theme(axis.text.x = element_text(angle = 45, hjust=1)) +
+  xlab("Year") + ylab("Duplicate Incident totals by Borough")
+
+
+# Plot of summary of all incident totals by Borough by Year
+nyc_data_summary_by_boro_year %>%
+  ggplot(aes(fill = BORO,x=inc_year, y=totals_by_boro_year)) +
+  geom_bar(position = 'dodge', stat = 'identity') +
+  theme(axis.text.x = element_text(angle = 45, hjust=1)) +
+  xlab("Year") + ylab("Totals by Borough")
+
+# Plot of summary of duplicate incident totals by Borough by Year >= 2017
+dup_boro_summary_by_year %>% filter(dup_year >= 2017) %>% 
+  ggplot(aes(fill = BORO,x=dup_year, y=dup_totals_by_year)) +
+  geom_bar(position = 'dodge', stat = 'identity') +
+  theme(axis.text.x = element_text(angle = 45, hjust=1)) +
+  xlab(" Year >= 2017") + ylab("Duplicate Incident totals by Borough")
+
+# Plot of summary of all incident totals by Borough by Year >= 2017
+nyc_data_summary_by_boro_year %>% filter(inc_year >= 2017) %>%
+  ggplot(aes(fill = BORO,x=inc_year, y=totals_by_boro_year)) +
+  geom_bar(position = 'dodge', stat = 'identity') +
+  theme(axis.text.x = element_text(angle = 45, hjust=1)) +
+  xlab(" Year >= 2017") + ylab("Totals by Borough")
+
+# The plots with Year >= 2017 has been selected and drawn with an underlying bias that the # of incidents per year is increasing after
+# it slowly fell
+```
+****
+### Modeling the data
+```{r,echo=TRUE}
+# Creating a model with total incidents per year 
+# totals_by_year = estimate of the intercept + inc_year*estimate
+nyc_ps_model <- lm(totals_by_year ~ inc_year, data = nyc_data_summary_by_year)
+summary(nyc_ps_model)
+
+# Creating the dataframe for the model 
+nyc_data_model_by_year <- nyc_data_summary_by_year %>% mutate(pred_totals = predict(nyc_ps_model))
+
+# Plotting the model against the actuals by Year
+# Actual values in blue
+# Predictions in red
+# totals_by_year = 89177.93 + inc_year*(-43.50)
+nyc_data_model_by_year %>%
+  ggplot() +
+  geom_point(aes(x=factor(inc_year), y=totals_by_year),color = "blue") +
+  geom_point(aes(x=factor(inc_year), y=pred_totals),color = "red") +  
+  theme(axis.text.x = element_text(angle = 45, hjust=1)) +
+  xlab("Year") + ylab("Total Incidents by Year")
+```
