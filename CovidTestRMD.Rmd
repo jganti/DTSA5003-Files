@@ -1,0 +1,212 @@
+---
+title: "CovidDataTest"
+author: "Jagadish"
+date: "8/25/2022"
+output: html_document
+---
+
+### This project is an analysis on Covid 19 pandemic. It consists of covid timeseries data obtained from Johns Hopkins and vaccine dataset obtained from ourworldindata.org. The dataset is collated to do certain analysis on total covid cases and corresponding deaths. Vaccine data has been used to understand the impact in bringing the overall numbers down. The covid gloibal dataset has been primarily used and India as the country was the focus of this analysis 
+
+```{r setup, include=TRUE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(dplyr)
+library(readr)
+library(ggplot2)
+library(stringr)
+library(tidyr)
+library(lubridate)
+
+```
+### Reading the URL
+```{r,echo=TRUE}
+url_path <- "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/"
+file_names <- c("time_series_covid19_confirmed_US.csv", "time_series_covid19_confirmed_global.csv", "time_series_covid19_deaths_US.csv", "time_series_covid19_deaths_global.csv")
+covid_data_files <- str_c(url_path,file_names)
+#covid_data_files
+```
+```{r,echo = TRUE}
+#confirmed_US_cases <- read.csv(covid_data_files[1])
+confirmed_global_cases <- read.csv(covid_data_files[2])
+#confirmed_US_deaths <- read.csv(covid_data_files[3])
+confirmed_global_deaths <- read.csv(covid_data_files[4])
+```
+## **Data cleanup**
+### Global confirmed cases
+```{r,echo=TRUE}
+# Excluding unwanted columns of data
+confirmed_global_cases <- confirmed_global_cases %>% select(-c("Lat", "Long"))
+# Moving from a wide data set to a long one by making the Dates as rows insterad of keepin g them as columns
+confirmed_global_cases <- confirmed_global_cases %>% pivot_longer(cols = starts_with("X"), names_to = "Date", values_to = "Cases")
+# Cleaning up dates by removing the first character X
+confirmed_global_cases$Date <- gsub("X", "", as.character((confirmed_global_cases$Date)))
+# Converting the date to a proper Date format
+confirmed_global_cases <- confirmed_global_cases %>% mutate(Date = mdy(confirmed_global_cases$Date))
+# Renaming the columns to a standard
+colnames(confirmed_global_cases)[1] <- "Province_State"
+colnames(confirmed_global_cases)[2] <- "Country_Region"
+```
+### Global confirmed deaths
+```{r,echo=TRUE}
+# Excluding unwanted columns of data
+confirmed_global_deaths <- confirmed_global_deaths %>% select(-c("Lat", "Long"))
+# Moving from a wide data set to a long one by making the Dates as rows insterad of keepin g them as columns
+confirmed_global_deaths <- confirmed_global_deaths %>% pivot_longer(cols = starts_with("X"), names_to = "Date", values_to = "Deaths")
+# Cleaning up dates by removing the first character X
+confirmed_global_deaths$Date <- gsub("X", "", as.character((confirmed_global_deaths$Date)))
+# Converting the date to a proper Date format
+  confirmed_global_deaths <- confirmed_global_deaths %>% mutate(Date = mdy(confirmed_global_deaths$Date))
+#Renaming the columns to a standard
+colnames(confirmed_global_deaths)[1] <- "Province_State"
+colnames(confirmed_global_deaths)[2] <- "Country_Region"
+#head(confirmed_global_deaths)
+
+global_cases_deaths <- confirmed_global_cases %>% full_join(confirmed_global_deaths)
+str(global_cases_deaths)
+```
+****
+### Global Population data extract and cleanup
+```{r,echo=TRUE}
+population_data <- read.csv("https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/UID_ISO_FIPS_LookUp_Table.csv")
+
+global_cases_deaths <- global_cases_deaths %>% left_join(population_data, by = c("Province_State", "Country_Region")) %>% select(-c("UID":"Long_")) %>% filter(Cases > 0)
+
+tail(global_cases_deaths %>% filter(Country_Region == "India"))
+```
+****
+### Global Vaccination Data from ourworldindata.org
+```{r,echo=TRUE}
+vaccination_data <- read.csv("https://github.com/owid/covid-19-data/raw/master/public/data/vaccinations/vaccinations.csv")
+
+colnames(vaccination_data)[1] <- "Country_Region"
+colnames(vaccination_data)[3] <- "Date"
+
+vaccination_data$Date <- as.Date(vaccination_data$Date)
+
+vaccination_data$people_vaccinated[is.na(vaccination_data$people_vaccinated)] <- 0
+vaccination_data$daily_vaccinations[is.na(vaccination_data$daily_vaccinations)] <- 0
+vaccination_data$total_vaccinations[is.na(vaccination_data$total_vaccinations)] <- 0
+str(vaccination_data)
+
+vaccination_data_subset <- vaccination_data %>% select(Country_Region, Date, total_vaccinations, people_vaccinated, daily_vaccinations)
+str(vaccination_data_subset)
+
+global_cases_deaths <- global_cases_deaths %>% left_join(vaccination_data_subset, by = c("Country_Region", "Date"))
+
+india_data <- global_cases_deaths %>% filter(Country_Region == "India")
+india_data <- india_data %>% mutate(deaths_per_1000 = (Deaths*1000)/Population,
+                                    cases_per_1000 = (Cases*1000)/Population,
+                                    vacc_per_1000 = (total_vaccinations*1000)/Population)
+india_data$people_vaccinated[is.na(india_data$people_vaccinated)] <- 0
+india_data$daily_vaccinations[is.na(india_data$daily_vaccinations)] <- 0
+india_data$total_vaccinations[is.na(india_data$total_vaccinations)] <- 0
+
+india_data$deaths_per_1000[is.na(india_data$deaths_per_1000)] <- 0
+india_data$cases_per_1000[is.na(india_data$cases_per_1000)] <- 0
+india_data$vacc_per_1000[is.na(india_data$vacc_per_1000)] <- 0
+
+str(india_data)
+tail(india_data %>% filter(daily_vaccinations > 0) %>%
+       select(Date, Cases, Deaths, total_vaccinations, people_vaccinated, daily_vaccinations))
+
+```
+
+****
+
+# Plots
+## India Covid 19 Data analysis of Cases, Deaths and Vaccinations between Jan 2020 and Oct 2022
+```{r,echo=FALSE}
+india_data %>%
+  ggplot() +
+  geom_point(aes(x=Date, y=Cases), color="blue") +
+  geom_text(aes(x=last(Date), y=last(Cases), label = "Cases", hjust=1, vjust=-0.5)) +
+  geom_point(aes(x=Date, y=Deaths), color="red") +
+  geom_text(aes(x=last(Date), y=last(Deaths), label = "Deaths", hjust=1, vjust=-0.5)) +
+  geom_point(aes(x=Date, y=total_vaccinations), color="green") +
+  geom_text(aes(x=last(Date), y=last(total_vaccinations), label = "Vaccinations", hjust=1, vjust=-0.5)) +
+  scale_y_continuous(trans="log10") +
+  xlab("Year") + ylab("Total of")
+```
+
+#### The plot above shows the trend in total cases, deaths and vaccinations over a period of 2 years and 10 months. Both the Cases and Deaths show a similar trend with both increasing exponentially from 2020 until 1st quarter of 2021.During the beginning of 2021, vaccines came into play and then Indian govt started administering from Feb 2021. The vaccination administration also grew exponentially in the beginning. Then all the 3 plots to taper off from IInd quarter of 2021 until today.
+
+****
+```{r,echo=FALSE}
+india_data %>%
+  filter(Date > "2021-02-01") %>%
+  ggplot() +
+  geom_point(aes(x=Date, y=cases_per_1000), color="blue", size=2) +
+  geom_text(aes(x=last(Date), y=last(cases_per_1000), label = "Cases Per 100K", hjust=1, vjust=-0.5)) +
+  geom_point(aes(x=Date, y=deaths_per_1000), color="red", size=2) +
+  geom_text(aes(x=last(Date), y=last(deaths_per_1000), label = "Deaths Per 100K", hjust=1, vjust=-0.5)) +
+  geom_point(aes(x=Date, y=vacc_per_1000), color="green", size=2) +
+  geom_text(aes(x=last(Date), y=last(vacc_per_1000), label = "Vaccines Per 100K", hjust=1, vjust=-0.5)) +
+  scale_y_continuous(trans="log10") +
+  xlab("Year") + ylab("Total")
+```
+
+#### The plot above shows a subset of timeline of the Cases, Deaths and Vaccinations from Feb 2021 until Oct 2022. This is the time when vaccines began to be administered to people by the Indian govt. The plots shows that both the Cases and Deaths seem to taper off as vaccines administration increased exponentially. As more and more people were vaccinated the total cases and subsequent fatalities also started coming down - this is indicated by the tapering off of the plots
+
+****
+
+## What happened during so called second Covid wave in India?
+```{r,echo=FALSE}
+second_wave <- india_data %>% filter(Date > "2021-03-01" & Date < "2021-06-01" )
+second_wave <- second_wave %>% mutate(daily_cases = Cases - lag(Cases),
+                                                  daily_deaths = Deaths - lag(Deaths))
+second_wave %>%
+  ggplot() +
+  geom_point(aes(x=Date, y=daily_cases), color ="dark blue") 
+
+second_wave %>%
+  ggplot() +
+  geom_point(aes(x=Date, y=daily_deaths), color = "dark red")
+
+```
+
+#### Second wave supposedly happened during March 2021 and May 2021. This was the period where you see a spike in both Cases and Deaths. The covid rules were relaxed in the country and there were a few super spreader events. This coupled with shortage of vaccines briefly due to exports also possibly added to the spikes
+
+****
+
+## Possible covid third wave
+```{r,echo=FALSE}
+third_wave <- india_data %>% filter(Date > "2021-12-01" & Date < "2022-02-01" )
+third_wave <- third_wave %>% mutate(daily_cases = Cases - lag(Cases),
+                                                  daily_deaths = Deaths - lag(Deaths))
+third_wave %>%
+  ggplot() +
+  geom_point(aes(x=Date, y=daily_cases), color ="dark blue")  
+
+third_wave %>%
+  ggplot() +
+  geom_point(aes(x=Date, y=daily_deaths), color = "dark red")
+
+```
+
+#### During Dec 2021 and Jan 2022, the daily vaccination rates in India have come down. The trend started sometime in Nov 21, but more visible in later 2 months. The covid cases show a spike during these 2 months, but deaths do not. These could be new covid cases or people testing positive despite vaccinated. Further analysis needed to ascertain the causes
+
+****
+
+## Modeling of Covid 19 data
+#### We will create a model to predict the vaccine efficacy to combat Covid cases in the poulation. The vaccines were introduced a year into the pandemic. India has 2 major vaccines - CoviShield and Covaxin. Both were administered on a very large scale with Indian govt prioritizing the most vulnerable populatiuons first, followed by next most vulnerable ones and so on. The covid cases have come down soon after. So we expect a strong correlation between vaccine consumption and its impact on reducing the covid cases in the country
+```{r,echo=FALSE}
+vaccine_efficacy <- lm(cases_per_1000 ~ vacc_per_1000, india_data)
+summary(vaccine_efficacy)
+# The statistics definitely show a strong correlation between vaccine administration and covid cases
+india_data_model <- india_data %>% mutate(cases_model = predict(vaccine_efficacy))
+str(india_data_model)
+
+india_data_model %>%
+  filter(Date > "2020-12-31") %>%
+  ggplot() +
+  geom_point(aes(x=Date, y=cases_per_1000), color = "blue") +
+  geom_point(aes(x=Date, y=cases_model), color ="brown") +
+  xlab("Year") +
+  ylab("Totals")
+```
+
+#### The plot shows Actual Cases Per 1000 (Blue) plotted against the Date with predicted cases(in Brown) against the same Date creiteria. In conclusion there is a strong correlation between vaccine data and the covid cases. I would expect a simnilar correlation between deaths and the vaccines information - if they are modelled together. There is a certain bias inherent in all these plots. The efficacy of the vaccines to prevent new Covid cases and also reducing fatalities as well as underlying assumption that no other factor would've helped with this process. Certain sections/age groups of the population could have a better immunity and that would have helped in lowering the fatalities. Not every individual would have exhibited symptoms and even testing iself would factor into the bias and assumptions  
+
+```{r,echo=FALSE}
+sessionInfo()
+```
